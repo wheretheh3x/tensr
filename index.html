@@ -1,0 +1,251 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>Enhanced Futuristic AI Art with Subtle Background Effect</title>
+    <script src="https://d3js.org/d3.v5.min.js"></script>
+    <style>
+        body {
+            margin: 0;
+            background: black;
+        }
+        svg {
+            display: block;
+        }
+    </style>
+</head>
+<body>
+    <svg></svg>
+    <script>
+        // Set up SVG dimensions
+        var svg = d3.select("svg");
+        var width = window.innerWidth;
+        var height = window.innerHeight;
+        svg.attr("width", width).attr("height", height);
+
+        // Create zoom behavior with panning disabled
+        var zoom = d3.zoom()
+            .scaleExtent([0.1, 10]) // Zoom range: 10% to 1000%
+            .filter(function() {
+                if (d3.event.type === "wheel") return true;
+                if (d3.event.type === "touchstart" && d3.event.touches.length >= 2) return true;
+                return false;
+            })
+            .on("zoom", zoomed);
+
+        // Attach zoom to SVG
+        svg.call(zoom);
+
+        // Define glow filter
+        var defs = svg.append("defs");
+        defs.append("filter").attr("id", "glow")
+            .append("feGaussianBlur").attr("stdDeviation", "2.5").attr("result", "coloredBlur")
+            .append("feMerge")
+            .append("feMergeNode").attr("in", "coloredBlur")
+            .append("feMergeNode").attr("in", "SourceGraphic");
+
+        // Define background pattern for subtle moving grid
+        var pattern = defs.append("pattern")
+            .attr("id", "bgPattern")
+            .attr("width", "20")
+            .attr("height", "20")
+            .attr("patternUnits", "userSpaceOnUse");
+
+        var patternContent = pattern.append("g").attr("id", "patternContent");
+        patternContent.append("rect").attr("width", "20").attr("height", "20").attr("fill", "black");
+        patternContent.append("line").attr("x1", "0").attr("y1", "0").attr("x2", "20").attr("y2", "0").attr("stroke", "rgba(255,255,255,0.02)").attr("stroke-width", "1");
+        patternContent.append("line").attr("x1", "0").attr("y1", "0").attr("x2", "0").attr("y2", "20").attr("stroke", "rgba(255,255,255,0.02)").attr("stroke-width", "1");
+
+        // Background rectangle with pattern fill
+        var background = svg.append("rect")
+            .attr("width", width)
+            .attr("height", height)
+            .style("fill", "url(#bgPattern)")
+            .style("pointer-events", "all");
+
+        // Content group for all elements
+        var content = svg.append("g");
+
+        // Initialize nodes and links
+        var N = 10, k = 2;
+        var nodes = d3.range(N).map(function(i) {
+            return {id: i, x: Math.random() * width, y: Math.random() * height};
+        });
+        var links = [];
+        nodes.forEach(function(node) {
+            var distances = nodes.map(function(other, i) {
+                if (other === node) return {index: i, dist: Infinity};
+                return {index: i, dist: Math.hypot(node.x - other.x, node.y - other.y)};
+            });
+            distances.sort(function(a, b) { return a.dist - b.dist; });
+            distances.slice(0, k).forEach(function(d) {
+                var edge = {source: node.id, target: d.index};
+                if (!links.some(l => l.source === edge.target && l.target === edge.source)) {
+                    links.push(edge);
+                }
+            });
+        });
+
+        // Set up force simulation
+        var simulation = d3.forceSimulation(nodes)
+            .force("link", d3.forceLink(links).id(d => d.id).distance(50))
+            .force("charge", d3.forceManyBody().strength(-100))
+            .force("center", d3.forceCenter(width / 2, height / 2));
+
+        // Create links
+        var link = content.append("g").selectAll("line")
+            .data(links).enter().append("line")
+            .style("stroke", "#999")
+            .style("stroke-width", 1);
+
+        // Create nodes
+        var node = content.append("g").selectAll("circle")
+            .data(nodes).enter().append("circle")
+            .attr("r", 5)
+            .style("fill", "cyan")
+            .attr("filter", "url(#glow)");
+
+        // Create dots for links
+        var dot = content.append("g").selectAll("circle")
+            .data(links).enter().append("circle")
+            .attr("r", 2)
+            .style("fill", "white")
+            .attr("filter", "url(#glow)");
+
+        // Enable dragging on nodes
+        node.call(d3.drag()
+            .on("start", dragstarted)
+            .on("drag", dragged)
+            .on("end", dragended));
+
+        // Handle node addition with left-click or tap
+        var startTime;
+        background.on("mousedown touchstart", function() {
+            if (d3.event.type === "mousedown" && d3.event.button !== 0) return;
+            startTime = Date.now();
+        });
+        background.on("mouseup touchend", function() {
+            if (d3.event.type === "mouseup" && d3.event.button !== 0) return;
+            var duration = (Date.now() - startTime) / 1000;
+            var speed = duration < 0.3 ? 50 : duration >= 1 ? 300 : 50 + (duration - 0.3) / 0.7 * 250;
+            var x, y;
+            if (d3.event.type === "mouseup") {
+                x = d3.event.clientX;
+                y = d3.event.clientY;
+            } else if (d3.event.type === "touchend") {
+                x = d3.event.changedTouches[0].clientX;
+                y = d3.event.changedTouches[0].clientY;
+            }
+            var transform = d3.zoomTransform(svg.node());
+            x = (x - transform.x) / transform.k;
+            y = (y - transform.y) / transform.k;
+            addNode(x, y, speed);
+        });
+
+        // Simulation tick function with background animation
+        function tick() {
+            // Animate background pattern
+            var time = Date.now() / 1000;
+            var offset = (time * 2) % 20; // Slow movement: 2 units per second
+            d3.select("#patternContent").attr("transform", `translate(0, ${offset})`);
+
+            // Update simulation
+            simulation.force("link").distance(50 + 10 * Math.sin(2 * Math.PI * time / 4));
+            link.attr("x1", d => d.source.x).attr("y1", d => d.source.y)
+                .attr("x2", d => d.target.x).attr("y2", d => d.target.y);
+            node.attr("cx", d => d.x).attr("cy", d => d.y);
+            dot.each(function(d) {
+                if (d.dot_t === undefined) d.dot_t = Math.random();
+                var t = d.dot_t;
+                var x = (1 - t) * d.source.x + t * d.target.x;
+                var y = (1 - t) * d.source.y + t * d.target.y;
+                d3.select(this).attr("cx", x).attr("cy", y);
+                d.dot_t += 0.01;
+                if (d.dot_t > 1) d.dot_t = 0;
+            });
+        }
+        simulation.on("tick", tick);
+
+        // Drag handlers
+        function dragstarted(d) {
+            if (!d3.event.active) simulation.alphaTarget(0.3).restart();
+            d.fx = d.x;
+            d.fy = d.y;
+        }
+        function dragged(d) {
+            var transform = d3.zoomTransform(svg.node());
+            d.fx = (d3.event.sourceEvent.clientX - transform.x) / transform.k;
+            d.fy = (d3.event.sourceEvent.clientY - transform.y) / transform.k;
+        }
+        function dragended(d) {
+            if (!d3.event.active) simulation.alphaTarget(0);
+            d.fx = null;
+            d.fy = null;
+        }
+
+        // Add node function
+        function addNode(x, y, speed) {
+            var angle = Math.random() * 2 * Math.PI;
+            var vx = speed * Math.cos(angle);
+            var vy = speed * Math.sin(angle);
+            var newNode = {id: nodes.length, x: x, y: y, vx: vx, vy: vy};
+            nodes.push(newNode);
+            var distances = nodes.slice(0, -1).map(function(n, i) {
+                return {index: i, dist: Math.hypot(n.x - x, n.y - y)};
+            });
+            distances.sort(function(a, b) { return a.dist - b.dist; });
+            var nearest = distances.slice(0, k).map(d => d.index);
+            nearest.forEach(function(i) {
+                links.push({source: i, target: newNode.id});
+            });
+            simulation.nodes(nodes);
+            simulation.force("link").links(links);
+            simulation.alpha(1).restart();
+            node = content.selectAll("circle.node").data(nodes, d => d.id);
+            node.exit().remove();
+            var nodeEnter = node.enter().append("circle")
+                .attr("class", "node")
+                .attr("r", 5)
+                .style("fill", "cyan")
+                .attr("filter", "url(#glow)");
+            nodeEnter.call(d3.drag().on("start", dragstarted).on("drag", dragged).on("end", dragended));
+            node = nodeEnter.merge(node);
+            link = content.selectAll("line").data(links);
+            link.exit().remove();
+            var linkEnter = link.enter().append("line")
+                .style("stroke", "#999")
+                .style("stroke-width", 1);
+            link = linkEnter.merge(link);
+            dot = content.selectAll("circle.dot").data(links);
+            dot.exit().remove();
+            var dotEnter = dot.enter().append("circle")
+                .attr("class", "dot")
+                .attr("r", 2)
+                .style("fill", "white")
+                .attr("filter", "url(#glow)");
+            dot = dotEnter.merge(dot);
+        }
+
+        // Zoom handler to keep content centered
+        function zoomed() {
+            var k = d3.event.transform.k;
+            var tx = (1 - k) * (width / 2);
+            var ty = (1 - k) * (height / 2);
+            content.attr("transform", `translate(${tx},${ty}) scale(${k})`);
+        }
+
+        // Handle window resize
+        function updateDimensions() {
+            width = window.innerWidth;
+            height = window.innerHeight;
+            svg.attr("width", width).attr("height", height);
+            background.attr("width", width).attr("height", height);
+            simulation.force("center", d3.forceCenter(width / 2, height / 2));
+            simulation.alpha(1).restart();
+            var currentTransform = d3.zoomTransform(svg.node());
+            zoomed({transform: currentTransform});
+        }
+        window.addEventListener("resize", updateDimensions);
+    </script>
+</body>
+</html>
